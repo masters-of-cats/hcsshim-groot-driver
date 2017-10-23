@@ -1,14 +1,14 @@
 package wooter
 
 import (
-	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 
+	"code.cloudfoundry.org/windows2016fs/layer"
+	"code.cloudfoundry.org/windows2016fs/writer"
 	"github.com/Microsoft/hcsshim"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
@@ -20,53 +20,28 @@ type HCSWoot struct {
 	BaseDir string
 }
 
-func (c HCSWoot) Unpack(id, parentID string, allParents []string, tar io.Reader) (size int, err error) {
+func (c HCSWoot) Unpack(id, parentID string, allParents []string, blob io.Reader) (size int, err error) {
 	dest := filepath.Join(c.BaseDir, VolumesDir, id)
 	if err := os.MkdirAll(dest, 0700); err != nil {
 		return 0, err
 	}
 
-	tmpTarDest, err := ioutil.TempDir("", id)
+	blobFile, err := ioutil.TempFile("", "blob")
 	if err != nil {
 		return 0, err
 	}
 
-	tarFile, err := os.Create(filepath.Join(tmpTarDest, "layer.tar"))
-	if err != nil {
-		return 0, err
-	}
-	fmt.Println(tarFile.Name())
-
-	_, err = io.Copy(tarFile, tar)
+	blobSize, err := io.Copy(blobFile, blob)
 	if err != nil {
 		return 0, err
 	}
 
-	tmpDest, err := ioutil.TempDir("", "woot-tmp")
-	if err != nil {
+	lm := layer.NewManager(hcsshim.DriverInfo{HomeDir: dest, Flavour: 1}, &writer.Writer{})
+	if err := lm.Extract(blobFile.Name(), id, allParents); err != nil {
 		return 0, err
 	}
 
-	tarCmd := exec.Command("tar", "-x", "-C", tmpDest, "-f", tarFile.Name())
-	tarCmd.Stdout = os.Stdout
-	tarCmd.Stderr = os.Stderr
-	if err := tarCmd.Run(); err != nil {
-		return 0, err
-	}
-
-	info := hcsshim.DriverInfo{
-		HomeDir: dest,
-		Flavour: 1,
-	}
-	if err := hcsshim.CreateLayer(info, id, parentID); err != nil {
-		return 0, err
-	}
-
-	if err := hcsshim.ImportLayer(info, id, tmpDest, allParents); err != nil {
-		return 0, err
-	}
-
-	return 0, nil
+	return int(blobSize), nil
 }
 
 func (c HCSWoot) Bundle(id string, parentIds []string) (specs.Spec, error) {
@@ -91,10 +66,24 @@ func (c HCSWoot) Bundle(id string, parentIds []string) (specs.Spec, error) {
 	if err := hcsshim.CreateSandboxLayer(info, id, parent, parentPaths); err != nil {
 		return specs.Spec{}, err
 	}
+	if err := hcsshim.ActivateLayer(info, id); err != nil {
+		return specs.Spec{}, err
+	}
+	if err := hcsshim.PrepareLayer(info, id, parentPaths); err != nil {
+		return specs.Spec{}, err
+	}
+
+	volumePath, err := hcsshim.GetLayerMountPath(info, id)
+	if err != nil {
+		return specs.Spec{}, err
+	}
 
 	return specs.Spec{
 		Root: &specs.Root{
-			Path: dest,
+			Path: volumePath,
+		},
+		Windows: &specs.Windows{
+			LayerFolders: parentPaths,
 		},
 	}, nil
 }
