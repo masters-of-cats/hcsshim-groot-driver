@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/julz/wooter"
+	"github.com/Microsoft/hcsshim"
+	wooter "github.com/cloudfoundry/hcswooter"
 )
 
 func TestWootASingleLayer(t *testing.T) {
@@ -20,11 +21,16 @@ func TestWootASingleLayer(t *testing.T) {
 		t.Fatal("tmpdir", err)
 	}
 
-	w := wooter.Cp{
-		BaseDir: dir,
+	w := wooter.HCSWoot{
+		Info: hcsshim.DriverInfo{
+			HomeDir: dir,
+			Flavor:  1,
+		},
 	}
 
-	if _, err := w.Unpack("my-id", "", mytar); err != nil {
+	parents := []string{}
+
+	if _, err := w.Unpack("my-id", "", parents, mytar); err != nil {
 		t.Errorf("expected unpack to succeed but got error %s", err)
 	}
 
@@ -53,15 +59,19 @@ func TestExistingAWoot(t *testing.T) {
 		t.Fatal("tmpdir", err)
 	}
 
-	w := wooter.Cp{
-		BaseDir: dir,
+	parents := []string{}
+	w := wooter.HCSWoot{
+		Info: hcsshim.DriverInfo{
+			HomeDir: dir,
+			Flavor:  1,
+		},
 	}
 
 	if w.Exists("my-id") {
 		t.Error("expected my-id not to exist before unpacking")
 	}
 
-	if _, err := w.Unpack("my-id", "", mytar); err != nil {
+	if _, err := w.Unpack("my-id", "", parents, mytar); err != nil {
 		t.Errorf("expected unpack to succeed but got error %s", err)
 	}
 
@@ -86,15 +96,19 @@ func TestWootingWithAParentWoot(t *testing.T) {
 		t.Fatal("tmpdir", err)
 	}
 
-	w := wooter.Cp{
-		BaseDir: dir,
+	parents := []string{"foo", "bar"}
+	w := wooter.HCSWoot{
+		Info: hcsshim.DriverInfo{
+			HomeDir: dir,
+			Flavor:  1,
+		},
 	}
 
-	if _, err := w.Unpack("my-parent-id", "", myparenttar); err != nil {
+	if _, err := w.Unpack("my-parent-id", "", parents, myparenttar); err != nil {
 		t.Errorf("expected unpack to succeed but got error %s", err)
 	}
 
-	if _, err := w.Unpack("my-id", "my-parent-id", mytar); err != nil {
+	if _, err := w.Unpack("my-id", "my-parent-id", parents, mytar); err != nil {
 		t.Errorf("expected unpack to succeed but got error %s", err)
 	}
 
